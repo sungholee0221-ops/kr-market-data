@@ -2,7 +2,7 @@
 
 Runs in GitHub Actions. Source: Naver Finance public chart/listing endpoints (no login). Tried in order, first that works:
   universe : m.stock.naver.com/api/stocks/marketValue/{KOSPI|KOSDAQ}  →  finance.naver.com/sise/sise_market_sum.naver (HTML)
-  daily    : fchart.stock.naver.com/sise.nhn (XML, adjusted)  →  api.stock.naver.com/chart/domestic/item/{code}/day (JSON)
+  daily    : api.stock.naver.com/chart/domestic/item/{code}/day (JSON, 2005~)  →  fchart.stock.naver.com/sise.nhn (XML, ~3000 bars)
 If nothing answers, the run writes probe.json and keeps previous data: nothing is circumvented.
 
 Layout written to $OUT_DIR (published as the `data` branch):
@@ -10,6 +10,7 @@ Layout written to $OUT_DIR (published as the `data` branch):
   1d/<code>.parquet       date, open, high, low, close, volume
   index/KOSPI.parquet, index/KOSDAQ.parquet
   meta.json, probe.json
+A run before 15:45 KST drops the (incomplete) current-day bar.
 Full re-download of daily history every run (adjusted prices can change after splits/rights issues).
 Universe: once added, kept. New names are added only when the month changes (and on the first run).
 """
@@ -163,7 +164,12 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
         df.loc[df[k] <= 0, k] = df.loc[df[k] <= 0, "close"]
     df["high"] = df[["open", "high", "low", "close"]].max(axis=1)
     df["low"] = df[["open", "high", "low", "close"]].min(axis=1)
-    return df.drop_duplicates("date").sort_values("date").reset_index(drop=True)
+    df = df.drop_duplicates("date").sort_values("date").reset_index(drop=True)
+    # 장중 실행이면 오늘 봉은 미완성 → 제외 (정규장 15:30 KST 마감, 여유 15분)
+    n = now_kst()
+    if n.hour * 60 + n.minute < 15 * 60 + 45:
+        df = df[df["date"] < pd.Timestamp(n.date())]
+    return df
 
 
 def fetch(symbol: str, order: list) -> tuple[pd.DataFrame | None, str]:
@@ -188,7 +194,8 @@ def main() -> int:
                                       "last": str(d["date"].max().date())}
         except Exception as e:  # noqa: BLE001
             probe[f"daily_{name}"] = {"ok": False, "error": str(e)[:200]}
-    order = [fn for name, fn in (("fchart", daily_fchart), ("api_stock", daily_api)) if probe[f"daily_{name}"]["ok"]]
+    # api_stock first: fchart returns at most ~3000 bars (2014~), api_stock covers START~
+    order = [fn for name, fn in (("api_stock", daily_api), ("fchart", daily_fchart)) if probe[f"daily_{name}"]["ok"]]
     u = build_universe(probe)
     (OUT / "probe.json").write_text(json.dumps(probe, ensure_ascii=False, indent=1))
     if not order or u is None:
