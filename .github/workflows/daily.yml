@@ -3,6 +3,8 @@ name: update-daily
 on:
   schedule:
     - cron: "47 7 * * 1-5"    # 16:47 KST weekdays, after the 15:30 KST close
+    - cron: "17 8 * * 1-5"    # 17:17 KST backup (GitHub schedule delays of hours observed); skipped if already up to date
+    - cron: "47 10 * * 1-5"   # 19:47 KST backup
   workflow_dispatch: {}
   push:
     branches: [main]
@@ -37,7 +39,16 @@ jobs:
         run: |
           git clone -q --depth 1 -b data "https://github.com/${{ github.repository }}.git" "${{ runner.temp }}/prev" || mkdir -p "${{ runner.temp }}/prev"
 
+      - name: Skip backup run if today's close is already published
+        id: fresh
+        run: |
+          today=$(TZ=Asia/Seoul date +%F)
+          last=$(jq -r '.last_daily_close // ""' "${{ runner.temp }}/prev/meta.json" 2>/dev/null || echo "")
+          echo "today=$today last=$last event=${{ github.event_name }}"
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$last" = "$today" ]; then echo "skip=1" >> "$GITHUB_OUTPUT"; fi
+
       - name: Fetch
+        if: steps.fresh.outputs.skip != '1'
         env:
           OUT_DIR: ${{ runner.temp }}/out
           PREV_DIR: ${{ runner.temp }}/prev
@@ -45,6 +56,7 @@ jobs:
 
       # data branch is a single orphan commit, force-pushed each run: repo size stays flat
       - name: Publish to data branch
+        if: steps.fresh.outputs.skip != '1'
         env:
           OUT_DIR: ${{ runner.temp }}/out
         run: |
