@@ -1,0 +1,12 @@
+{
+ "status": "ok",
+ "last_daily_close": "2026-11-27",
+ "universe": 350,
+ "universe_month": "2026-11",
+ "sources": {
+  "daily_api": 350
+ },
+ "failures": {},
+ "updated_kst": "2026-11-28T04:41:33+09:00",
+ "start": "2005-01-01"
+}
